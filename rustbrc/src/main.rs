@@ -5,9 +5,9 @@ use std::os::unix::fs::MetadataExt;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
 struct Measurements {
-    pub min: f32,
-    pub max: f32,
-    pub sum: f32,
+    pub min: i32,
+    pub max: i32,
+    pub sum: i64,
     pub count: u32
 }
 
@@ -34,25 +34,43 @@ fn parse_row(buffer: &[u8], i: &mut usize, result: &mut MeasureMap) -> bool {
     let Some(pos) = buffer.iter().skip(*i).position(|c| *c == b'\n') else {
         return false;  // Incomplete line.
     };
-    let n: f32 = std::str::from_utf8(&buffer[*i..*i+pos])
-        .expect("Found non-utf8 measurement")
-        .parse()
-        .expect("Measurement couldn't be parsed as f32.");
+    let mut digits = [0u8; 10];
+    let mut idigit = 0;
+    for c in &buffer[*i..*i + pos] {
+        match *c {
+            b'0' | b'1' | b'2' | b'3' | b'4' | b'5' | b'6' | b'7' | b'8'
+            | b'9' => {
+                digits[idigit] = *c - b'0';
+                idigit += 1;
+            }
+            _ => {}
+        }
+    }
+    let mut n = 0i16;
+    let mut m = 1i16;
+    for digit in digits[0..idigit].iter().rev() {
+        n += m * *digit as i16;
+        m *= 10;
+    }
+    if buffer[*i] == b'-' {
+        n = -n;
+    }
+
     *i += pos + 1;
 
     // Update the result.
     match result.get_mut(name) {
         Some(kv) => {
-            kv.max = kv.max.max(n);
-            kv.min = kv.min.min(n);
+            kv.max = kv.max.max(n as i32);
+            kv.min = kv.min.min(n as i32);
             kv.count += 1;
-            kv.sum += n;
+            kv.sum += n as i64;
         },
         None => {
             let _ = result.insert(name.to_vec(), Measurements {
-                min: n,
-                max: n,
-                sum: n,
+                min: n as i32,
+                max: n as i32,
+                sum: n as i64,
                 count: 1
             });
         }
