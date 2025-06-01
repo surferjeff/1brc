@@ -35,14 +35,11 @@ fn parse_row(buffer: &[u8], i: &mut usize, result: &mut MeasureMap) -> bool {
     let mut idigit = 0;
     let mut j = *i;
     for c in &buffer[*i..] {
-        match *c {
-            b'0' | b'1' | b'2' | b'3' | b'4' | b'5' | b'6' | b'7' | b'8'
-            | b'9' => {
-                digits[idigit] = *c - b'0';
-                idigit += 1;
-            }
-            b'\n' => { break },
-            _ => {}
+        if *c >= b'0' && *c <= b'9' {
+            digits[idigit] = *c - b'0';
+            idigit += 1;
+        } else if *c == b'\n' {
+            break;
         }
         j += 1;
     }
