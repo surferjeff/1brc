@@ -62,10 +62,14 @@ fn parse_row(buffer: &[u8], i: &mut usize, result: &mut MeasureMap) -> bool {
     // Update the result.
     match result.get_mut(name) {
         Some(kv) => {
-            kv.max = kv.max.max(n as i32);
-            kv.min = kv.min.min(n as i32);
             kv.count += 1;
             kv.sum += n as i64;
+            let n = n as i32;
+            if kv.max < n {
+                kv.max = n;
+            } else if kv.min > n {
+                kv.min = n;
+            }
         },
         None => {
             let _ = result.insert(name.to_vec(), Measurements {
