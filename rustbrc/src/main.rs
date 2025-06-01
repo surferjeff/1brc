@@ -1,9 +1,8 @@
-use std::fs::{File, OpenOptions};
+use std::fs::OpenOptions;
 use std::io::{Read, Seek, SeekFrom};
 use std::env;
 use std::os::unix::fs::MetadataExt;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use rayon::prelude;
 use std::collections::HashMap;
 
 struct Measurements {
@@ -19,10 +18,10 @@ struct Measurements {
 
 type MeasureMap = HashMap<Vec<u8>, Measurements>;
 
-fn parse_rows(chunk: Vec<u8>) -> MeasureMap {
+fn parse_rows(chunk: &[u8]) -> MeasureMap {
     let mut result = MeasureMap::new();
     let mut i = 0usize;
-    while parse_row(&chunk, &mut i, &mut result) {}
+    while parse_row(chunk, &mut i, &mut result) {}
     result
 }
 
@@ -30,23 +29,21 @@ fn parse_row(buffer: &[u8], i: &mut usize, result: &mut MeasureMap) -> bool {
     if *i >= buffer.len() { return false; }
 
     // Parse the name.
-    let name_start = *i;
-    while *i < buffer.len() && buffer[*i] != b';' {
-        *i += 1;
-    }
-    let name = &buffer[name_start..*i];
-    *i += 1;  // Advance past ;
+    let Some(pos) = buffer.iter().skip(*i).position(|c| *c == b';') else {
+        return false;  // Incomplete line.
+    };
+    let name = &buffer[*i..*i+pos];
+    *i += pos + 1;
 
     // Parse the measurement
-    let measurement_start = *i;
-    while *i < buffer.len() && buffer[*i] != b'\n' {
-        *i += 1;
-    }
-    let n: f32 = std::str::from_utf8(&buffer[measurement_start..*i])
+    let Some(pos) = buffer.iter().skip(*i).position(|c| *c == b'\n') else {
+        return false;  // Incomplete line.
+    };
+    let n: f32 = std::str::from_utf8(&buffer[*i..*i+pos])
         .expect("Found non-utf8 measurement")
         .parse()
         .expect("Measurement couldn't be parsed as f32.");
-    *i += 1;  // Advance past \n
+    *i += pos + 1;
 
     // Update the result.
     match result.get_mut(name) {
@@ -86,11 +83,24 @@ fn main() -> std::io::Result<()> {
     let _bytes_read: Vec<_> = chunks.par_iter().map(|offset| {
         let mut f = OpenOptions::new().read(true).open(measurements_path)
             .expect("Failed to open file.");
-        f.seek(SeekFrom::Start(*offset)).expect("Failed to seek in file.");
-        let mut buffer = vec![0u8; chunk_size as usize];
-        let bytes_read = f.read(&mut buffer).expect("Failed to read file.");
-        buffer.truncate(bytes_read);
-        bytes_read
+        let mut buffer = Vec::<u8>::new();
+        if *offset > 0 {
+            // Read 100 bytes before the start of the chunk to get the 
+            // line spanning the chunk boundary.
+            f.seek(SeekFrom::Start(*offset - 100)).expect("Failed to seek in file.");
+            buffer.resize(chunk_size as usize + 100, 0);
+            let bytes_read = f.read(&mut buffer).expect("Failed to read file.");
+            buffer.truncate(bytes_read);
+            // Find the boundary between lines.
+            let pos = buffer.iter().skip(100).rev().position(|c| *c == b'\n')
+                .expect("Failed to find line spanning chunks.");
+            parse_rows(&buffer[100-pos..])
+        } else {
+            buffer.resize(chunk_size as usize, 0);
+            let bytes_read = f.read(&mut buffer).expect("Failed to read file.");
+            buffer.truncate(bytes_read);
+            parse_rows(&buffer)
+        }
     }).collect();
 
     Ok(())
