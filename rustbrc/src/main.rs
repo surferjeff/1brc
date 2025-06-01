@@ -31,21 +31,25 @@ fn parse_row(buffer: &[u8], i: &mut usize, result: &mut MeasureMap) -> bool {
     *i += pos + 1;
 
     // Parse the measurement
-    let Some(pos) = buffer.iter().skip(*i).position(|c| *c == b'\n') else {
-        return false;  // Incomplete line.
-    };
     let mut digits = [0u8; 10];
     let mut idigit = 0;
-    for c in &buffer[*i..*i + pos] {
+    let mut j = *i;
+    for c in &buffer[*i..] {
         match *c {
             b'0' | b'1' | b'2' | b'3' | b'4' | b'5' | b'6' | b'7' | b'8'
             | b'9' => {
                 digits[idigit] = *c - b'0';
                 idigit += 1;
             }
+            b'\n' => { break },
             _ => {}
         }
+        j += 1;
     }
+    if j == buffer.len() {
+        return false;
+    }
+
     let mut n = 0i16;
     let mut m = 1i16;
     for digit in digits[0..idigit].iter().rev() {
@@ -56,7 +60,7 @@ fn parse_row(buffer: &[u8], i: &mut usize, result: &mut MeasureMap) -> bool {
         n = -n;
     }
 
-    *i += pos + 1;
+    *i = j + 1;
 
     // Update the result.
     match result.get_mut(name) {
