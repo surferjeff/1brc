@@ -1,7 +1,9 @@
-use std::fs::File;
-use std::io::Read;
+use std::fs::{File, OpenOptions};
+use std::io::{Read, Seek, SeekFrom};
 use std::env;
-use threadpool::ThreadPool;
+use std::os::unix::fs::MetadataExt;
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use rayon::prelude;
 use std::collections::HashMap;
 
 struct Measurements {
@@ -71,41 +73,25 @@ fn main() -> std::io::Result<()> {
     // Usage:
     //   rustbrc <size of read chunk in MB> /path/to/measurements.txt
     let args: Vec<String> = env::args().collect();
-    let chunk_mb: usize = args.get(1)
-        .expect("Missing arg1: size of chunk in MB")
-        .parse()
-        .expect("Expected arg1 to be an integer.");
-    let chunk_size = chunk_mb * 1024 * 1024;
+    
+    let measurements_path = args.get(1)
+        .expect("Missing arg1: /path/to/measurements.txt");
+    let metadata = std::fs::metadata(measurements_path)
+        .expect("Failed to get metadata");
+    let filesize = metadata.size();
+    let chunk_count = num_cpus::get() as u64;
+    let chunk_size = (filesize + chunk_count) / chunk_count;
+    let chunks: Vec<u64> = (0..chunk_count).map(|n| n * chunk_size).collect();
 
-    let mut file = File::open(args.get(2)
-        .expect("Missing arg2: /path/to/measurements.txt"))?;
+    let _bytes_read: Vec<_> = chunks.par_iter().map(|offset| {
+        let mut f = OpenOptions::new().read(true).open(measurements_path)
+            .expect("Failed to open file.");
+        f.seek(SeekFrom::Start(*offset)).expect("Failed to seek in file.");
+        let mut buffer = vec![0u8; chunk_size as usize];
+        let bytes_read = f.read(&mut buffer).expect("Failed to read file.");
+        buffer.truncate(bytes_read);
+        bytes_read
+    }).collect();
 
-    let num_threads = num_cpus::get();
-    let pool = ThreadPool::new(num_threads);
-
-    let mut next_buffer = Vec::<u8>::new();
-    loop {
-        let mut buffer = next_buffer;
-        buffer.resize(chunk_size, 0);
-        let bytes_read = file.read(&mut buffer)?;
-
-        if bytes_read == 0 {
-            break;
-        }
-
-        buffer.truncate(bytes_read); // Trim to actual size read
-
-        // Find the last newline
-        let last_lf = buffer.iter().rev().position(|c| *c == b'\n').expect(
-            "failed to find line feed character in buffer.");
-        next_buffer = buffer[buffer.len()-last_lf..].to_vec();
-        buffer.truncate(buffer.len() - last_lf);
-
-        pool.execute(move || {
-            parse_rows(buffer); // move buffer directly
-        });
-    }
-
-    pool.join(); // Wait for all threads
     Ok(())
 }
