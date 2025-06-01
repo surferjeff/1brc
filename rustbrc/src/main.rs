@@ -3,7 +3,6 @@ use std::io::{Read, Seek, SeekFrom};
 use std::env;
 use std::os::unix::fs::MetadataExt;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use std::collections::HashMap;
 
 struct Measurements {
     pub min: f32,
@@ -12,14 +11,10 @@ struct Measurements {
     pub count: u32
 }
 
-// pub fn combine(m1: &Measurements, m2: &measurements) {
-
-// }
-
-type MeasureMap = HashMap<Vec<u8>, Measurements>;
+type MeasureMap = fxhash::FxHashMap<Vec<u8>, Measurements>;
 
 fn parse_rows(chunk: &[u8]) -> MeasureMap {
-    let mut result = MeasureMap::new();
+    let mut result = MeasureMap::with_hasher(fxhash::FxBuildHasher::default());
     let mut i = 0usize;
     while parse_row(chunk, &mut i, &mut result) {}
     result
